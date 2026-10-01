@@ -23,12 +23,58 @@
 
 # shellcheck source=/dev/null
 configPath="$HOME/.config/tbsm/"
-configFile="$HOME/.config/tbsm/config"
-if [ -e $configFile ]; then
-    source $configFile
+configFile="$configPath/config"
+
+# Global variables for menu selection
+options=()
+choice=0
+
+if [ -e "$configFile" ]; then
+    source "$configFile"
 else
-    mkdir -p $configPath && touch $configFile
+    mkdir -p "$configPath" && touch "$configFile"
+    # Add default configuration with comments
+    cat > "$configFile" << 'EOF'
+# TBSM Configuration File
+# Set enablePinLogin=1 to enable PIN login
+# Set userPin to your desired PIN (numbers only recommended)
+# Example: enablePinLogin=1
+#          userPin="1234"
+
+enablePinLogin=0
+userPin=""
+
+# Display options
+showStatus=1
+showUserAtHost=1
+showLinuxVersion=1
+showTime=1
+showLinuxDistName=1
+showUptime=1
+
+# Run xinitrc/xsession
+runXinitrc=0
+
+# Wayland support
+enableWayland=1
+
+# TTY restriction (set to 1 to only run on VT1, 0 to run on any TTY)
+restrictToVT1=0
+EOF
 fi
+
+# Set defaults for any missing configuration options
+[[ -z $enablePinLogin ]] && enablePinLogin=0
+[[ -z $userPin ]] && userPin=""
+[[ -z $showStatus ]] && showStatus=1
+[[ -z $showUserAtHost ]] && showUserAtHost=1
+[[ -z $showLinuxVersion ]] && showLinuxVersion=1
+[[ -z $showTime ]] && showTime=1
+[[ -z $showLinuxDistName ]] && showLinuxDistName=1
+[[ -z $showUptime ]] && showUptime=1
+[[ -z $runXinitrc ]] && runXinitrc=0
+[[ -z $enableWayland ]] && enableWayland=1
+[[ -z $restrictToVT1 ]] && restrictToVT1=0
 
 # set colors
 resetColor=$(tput sgr0)
@@ -63,6 +109,8 @@ informationTextColor=$(tput setaf 7)
 
 # don't run xinitrc by default
 [[ -z $runXinitrc ]] && runXinitrc=0
+
+
 
 #move cursor in terminal
 function gotoxy {
@@ -294,6 +342,140 @@ function versionInfo() {
     center "${bannerTextColor} tbsm (v2022.01.23)"
 }
 
+# function to handle PIN login
+function pinLogin {
+    if [[ $enablePinLogin -eq 1 && -n "$userPin" ]]; then
+        local attempts=3
+        local maxAttempts=3
+        
+        while [[ $attempts -gt 0 ]]; do
+            pageColor "$sysPageColor" "clear"
+            echo -e "\n${boldText}${bannerTextColor}"
+            center "████████╗██████╗ ███████╗███╗   ███╗"
+            center "╚══██╔══╝██╔══██╗██╔════╝████╗ ████║"
+            center "   ██║   ██████╔╝███████╗██╔████╔██║"
+            center "   ██║   ██╔══██╗╚════██║██║╚██╔╝██║"
+            center "   ██║   ██████╔╝███████║██║ ╚═╝ ██║"
+            center "   ╚═╝   ╚═════╝ ╚══════╝╚═╝     ╚═╝"
+            echo "${resetColor}"
+            
+            center "${importantTextColor}PIN LOGIN"
+            newline
+            center "${informationTextColor}Enter your PIN to continue"
+            center "${informationTextColor}Attempts remaining: $attempts"
+            newline
+            
+            # Disable echo for PIN input
+            stty -echo
+            read -p "$(centerText "${normalTextColor}PIN: ")" enteredPin
+            stty echo
+            newline
+            newline
+            
+            if [[ "$enteredPin" == "$userPin" ]]; then
+                return 0
+            else
+                center "${boldText}$(tput setaf 1)Incorrect PIN!${resetColor}"
+                sleep 2
+                ((attempts--))
+            fi
+        done
+        
+        # Too many failed attempts
+        pageColor "$sysPageColor" "clear"
+        center "${boldText}$(tput setaf 1)Too many failed attempts!${resetColor}"
+        center "${informationTextColor}Access denied."
+        sleep 3
+        exec $SHELL
+    fi
+    return 0
+}
+
+# function to setup PIN login
+function setupPinLogin {
+    pageColor "$sysPageColor" "clear"
+    echo -e "\n${boldText}${bannerTextColor}"
+    center "████████╗██████╗ ███████╗███╗   ███╗"
+    center "╚══██╔══╝██╔══██╗██╔════╝████╗ ████║"
+    center "   ██║   ██████╔╝███████╗██╔████╔██║"
+    center "   ██║   ██╔══██╗╚════██║██║╚██╔╝██║"
+    center "   ██║   ██████╔╝███████║██║ ╚═╝ ██║"
+    center "   ╚═╝   ╚═════╝ ╚══════╝╚═╝     ╚═╝"
+    echo "${resetColor}"
+    
+    center "${importantTextColor}PIN LOGIN SETUP"
+    newline
+    center "${informationTextColor}Setup PIN login for TBSM"
+    newline
+    
+    # Ask for PIN
+    stty -echo
+    read -p "$(centerText "${normalTextColor}Enter new PIN: ")" pin1
+    newline
+    read -p "$(centerText "${normalTextColor}Confirm PIN: ")" pin2
+    stty echo
+    newline
+    newline
+    
+    if [[ -z "$pin1" ]]; then
+        center "${boldText}$(tput setaf 1)PIN cannot be empty!${resetColor}"
+        sleep 2
+        return 1
+    fi
+    
+    if [[ "$pin1" != "$pin2" ]]; then
+        center "${boldText}$(tput setaf 1)PINs do not match!${resetColor}"
+        sleep 2
+        return 1
+    fi
+    
+    # Update config file
+    if [[ $(grep "^enablePinLogin=" "$configFile") ]]; then
+        sed -i "s/^enablePinLogin=.*/enablePinLogin=1/" "$configFile"
+    else
+        echo "enablePinLogin=1" >> "$configFile"
+    fi
+    
+    if [[ $(grep "^userPin=" "$configFile") ]]; then
+        sed -i "s/^userPin=.*/userPin=\"$pin1\"/" "$configFile"
+    else
+        echo "userPin=\"$pin1\"" >> "$configFile"
+    fi
+    
+    center "${boldText}$(tput setaf 2)PIN login enabled successfully!${resetColor}"
+    sleep 2
+    return 0
+}
+
+# function to disable PIN login
+function disablePinLogin {
+    pageColor "$sysPageColor" "clear"
+    echo -e "\n${boldText}${bannerTextColor}"
+    center "████████╗██████╗ ███████╗███╗   ███╗"
+    center "╚══██╔══╝██╔══██╗██╔════╝████╗ ████║"
+    center "   ██║   ██████╔╝███████╗██╔████╔██║"
+    center "   ██║   ██╔══██╗╚════██║██║╚██╔╝██║"
+    center "   ██║   ██████╔╝███████║██║ ╚═╝ ██║"
+    center "   ╚═╝   ╚═════╝ ╚══════╝╚═╝     ╚═╝"
+    echo "${resetColor}"
+    
+    center "${importantTextColor}DISABLE PIN LOGIN"
+    newline
+    
+    # Update config file
+    if [[ $(grep "^enablePinLogin=" "$configFile") ]]; then
+        sed -i "s/^enablePinLogin=.*/enablePinLogin=0/" "$configFile"
+    fi
+    
+    if [[ $(grep "^userPin=" "$configFile") ]]; then
+        sed -i "s/^userPin=.*/userPin=\"\"/" "$configFile"
+    fi
+    
+    center "${boldText}$(tput setaf 2)PIN login disabled!${resetColor}"
+    sleep 2
+    return 0
+}
+
 # function to print banner
 function printBanner {
     #clear and change background page
@@ -327,16 +509,54 @@ function startDesktop {
         sleep 3
         shutdown -h now
     fi
-    # start chosen desktop environment from Exec command in .desktop file!
-    echo "${normalTextColor}starting $1 ! please wait... ${resetColor}"
-    execCommand=$(which $(grep "^Exec" /usr/share/xsessions/"$1".desktop | sed 's/Exec=//'))
-    # for debian systems
-    if [[ "$runXinitrc" == 1 ]] && [[ -e "$HOME/.xsession" ]]; then
-        DESKTOP_SESSION="$1" exec startx "$HOME/.xsession" "$execCommand"
-    elif [[ "$runXinitrc" == 1 ]] && [[ -e "$HOME/.xinitrc" ]]; then
-        DESKTOP_SESSION="$1" exec startx "$HOME/.xinitrc" "$execCommand"
+    
+    local sessionType="x11"
+    local desktopFile=""
+    local execCommand=""
+    
+    # Determine if it's a Wayland or X11 session
+    if [[ -f "/usr/share/wayland-sessions/$1.desktop" ]]; then
+        sessionType="wayland"
+        desktopFile="/usr/share/wayland-sessions/$1.desktop"
+    elif [[ -f "/usr/share/xsessions/$1.desktop" ]]; then
+        sessionType="x11"
+        desktopFile="/usr/share/xsessions/$1.desktop"
+    else
+        echo "${boldText}$(tput setaf 1)Error: Desktop file for '$1' not found!${resetColor}"
+        sleep 3
+        exec $SHELL
     fi
-    DESKTOP_SESSION="$1" exec startx "$execCommand"
+    
+    # start chosen desktop environment from Exec command in .desktop file!
+    echo "${normalTextColor}starting $1 ($sessionType) ! please wait... ${resetColor}"
+    execCommand=$(which $(grep "^Exec" "$desktopFile" | sed 's/Exec=//'))
+    
+    # Check if exec command was found
+    if [[ -z "$execCommand" ]]; then
+        echo "${boldText}$(tput setaf 1)Error: Could not find executable for '$1'!${resetColor}"
+        sleep 3
+        exec $SHELL
+    fi
+    
+    # Warning if X server is already running (when not restricted to VT1)
+    if [[ -n "$DISPLAY" ]] && [[ "$restrictToVT1" -eq 0 ]]; then
+        echo "${informationTextColor}Note: An X server is already running on another TTY.${resetColor}"
+        sleep 1
+    fi
+    
+    # Start the session based on type
+    if [[ "$sessionType" == "wayland" ]]; then
+        # Start Wayland session
+        DESKTOP_SESSION="$1" exec $execCommand
+    else
+        # Start X11 session
+        if [[ "$runXinitrc" == 1 ]] && [[ -e "$HOME/.xsession" ]]; then
+            DESKTOP_SESSION="$1" exec startx "$HOME/.xsession" "$execCommand"
+        elif [[ "$runXinitrc" == 1 ]] && [[ -e "$HOME/.xinitrc" ]]; then
+            DESKTOP_SESSION="$1" exec startx "$HOME/.xinitrc" "$execCommand"
+        fi
+        DESKTOP_SESSION="$1" exec startx "$execCommand"
+    fi
 }
 
 # function to search in array elements
@@ -353,26 +573,53 @@ function menuEntries {
     centerText "${normalTextColor} Select an entry using ${importantTextColor} up/down ${normalTextColor} or ${importantTextColor} left/right ${normalTextColor} keys and ${importantTextColor}enter${normalTextColor} to confirm: ${resetColor}"
     newline
     newline
-    # get all installed graphical evironments
-    desktops=$(ls /usr/share/xsessions/ | sed 's/.desktop//g')
+    
+    # get all installed graphical environments
+    local x11_desktops=""
+    local wayland_sessions=""
+    
+    if [[ -d /usr/share/xsessions ]]; then
+        x11_desktops=$(ls /usr/share/xsessions/ 2>/dev/null | sed 's/.desktop//g')
+    fi
+    
+    if [[ "$enableWayland" -eq 1 ]] && [[ -d /usr/share/wayland-sessions ]]; then
+        wayland_sessions=$(ls /usr/share/wayland-sessions/ 2>/dev/null | sed 's/.desktop//g')
+    fi
+    
+    # Combine sessions, removing duplicates
+    local all_sessions=$(echo -e "${x11_desktops}\n${wayland_sessions}" | sort -u | grep -v '^$')
+    
     staticEntries=("TTY" "reboot" "shutdown")
-    # set the options array as default
-    options=($desktops ${staticEntries[@]})
+    
+    # set the options array as default (global variable for use in main script)
+    if [[ -n "$all_sessions" ]]; then
+        options=($all_sessions ${staticEntries[@]})
+    else
+        options=(${staticEntries[@]})
+    fi
+    
+    # Check if there are any options
+    if [[ ${#options[@]} -eq 0 ]]; then
+        center "${boldText}$(tput setaf 1)No options available!${resetColor}"
+        sleep 3
+        exec $SHELL
+    fi
+    
     # create select menu from options
     selectOption "${options[@]}"
-    # set the user choice
+    # set the user choice (global variable for use in main script)
     choice=$?
     newUserChoice=${options[$choice]}
     # set user choice to use next time :
-    containsElement $newUserChoice "${staticEntries[@]}"
+    containsElement "$newUserChoice" "${staticEntries[@]}"
     if [ $? -eq 1 ]; then
-        if [[ $(grep "^lastUserChoice=" $configFile) ]]; then
-            sed -i "s/lastUserChoice=\"$lastUserChoice\"/lastUserChoice=\"$newUserChoice\"/" $configFile
-        elif [[ $(grep "^#lastUserChoice=" $configFile) ]]; then
-            sed -i '/#lastUserChoice/d' $configFile
-            echo -e "lastUserChoice=\"$newUserChoice\"" >>$configFile
+        if [[ $(grep "^lastUserChoice=" "$configFile") ]]; then
+            sed -i "s/lastUserChoice=\"$lastUserChoice\"/lastUserChoice=\"$newUserChoice\"/" "$configFile"
+        elif [[ $(grep "^#lastUserChoice=" "$configFile") ]]; then
+            sed -i '/#lastUserChoice/d' "$configFile"
+            echo -e "lastUserChoice=\"$newUserChoice\"" >>"$configFile"
         else
-            echo -e "lastUserChoice=\"$newUserChoice\"" >>$configFile
+            echo -e "lastUserChoice=\"$newUserChoice\"" >>"$configFile"
         fi
     fi
 
@@ -403,6 +650,38 @@ function setTermColors {
     fi
 }
 
+# Handle help command
+if [[ -n $1 && $1 == @(-h|--help) ]]; then
+    echo "TBSM - TUI Boot Selection Menu"
+    echo ""
+    echo "Usage: tbsm [OPTION]"
+    echo ""
+    echo "Options:"
+    echo "  -t, --test-mode    Test mode to preview the menu without starting a session"
+    echo "  --setup-pin        Setup PIN login for TBSM"
+    echo "  --disable-pin      Disable PIN login"
+    echo "  -h, --help         Show this help message"
+    echo ""
+    echo "Configuration:"
+    echo "  Edit ~/.config/tbsm/config to customize settings"
+    echo "  To enable PIN login, set enablePinLogin=1 and userPin=\"yourpin\""
+    echo "  To restrict to VT1 only, set restrictToVT1=1"
+    echo ""
+    exit 0
+fi
+
+# Handle PIN setup command
+if [[ -n $1 && $1 == @(--setup-pin) ]]; then
+    setupPinLogin
+    exit $?
+fi
+
+# Handle PIN disable command
+if [[ -n $1 && $1 == @(--disable-pin) ]]; then
+    disablePinLogin
+    exit $?
+fi
+
 # Test tbsm to see what it looks like if there's a -t or --test-mode argument
 if [[ -n $1 && $1 == @(-t|--test-mode) ]]; then
     # reset the terminal
@@ -410,6 +689,8 @@ if [[ -n $1 && $1 == @(-t|--test-mode) ]]; then
     setTermColors
     # print the script banner
     printBanner
+    # check PIN login if enabled
+    pinLogin
     # show the menu entries for user
     menuEntries
     # pass the desktop name or selected options to startDesktop function
@@ -422,17 +703,35 @@ if [[ -n $1 && $1 == @(-t|--test-mode) ]]; then
 fi
 
 # main commands
-if [[ ! $DISPLAY && $XDG_VTNR -eq 1 ]]; then
+if [[ "$restrictToVT1" -eq 1 ]]; then
+    # Old behavior: only run on VT1 if no X server is running
+    if [[ ! $DISPLAY && $XDG_VTNR -eq 1 ]]; then
+        # reset the terminal
+        tput reset
+        setTermColors
+        # print the script banner
+        printBanner
+        # check PIN login if enabled
+        pinLogin
+        # show the menu entries for user
+        menuEntries
+        # pass the desktop name or selected options to startDesktop function
+        startDesktop ${options[$choice]}
+    else
+        echo "Error : Another Xserver is running or not on VT1!, Abort."
+        exit
+    fi
+else
+    # New behavior: run on any TTY regardless of X server
     # reset the terminal
     tput reset
     setTermColors
     # print the script banner
     printBanner
+    # check PIN login if enabled
+    pinLogin
     # show the menu entries for user
     menuEntries
     # pass the desktop name or selected options to startDesktop function
     startDesktop ${options[$choice]}
-else
-    echo "Error : Another Xserver is running!, Abort."
-    exit
 fi
