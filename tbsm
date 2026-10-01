@@ -339,7 +339,7 @@ function systemStatus {
 }
 
 function versionInfo() {
-    center "${bannerTextColor} tbsm (v2022.01.23)"
+    center "${bannerTextColor} tbsm (v2026.10.01)"
 }
 
 # function to handle PIN login
